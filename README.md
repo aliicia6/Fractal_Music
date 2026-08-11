@@ -75,7 +75,7 @@ python .\explorador_visual.py
 - `Exportar JSON`/`CSV` e `Importar JSON` gestionan sesiones completas.
 - El menú `Strudel` transforma los atractores discretizados en comandos musicales.
 
-[FUNCIONA BASTANTE PEOR QUE LA VERSION EN RUST] --> La de Python esta muy desactualizada.
+FUNCIONA BASTANTE PEOR QUE LA VERSION EN RUST --> La de Python esta muy desactualizada.
 ---
 
 ## Versión Rust (eframe/egui)
