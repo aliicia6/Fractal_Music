@@ -1,7 +1,7 @@
 # Fractal Music
 
 Aplicación de investigación matemática para explorar sucesiones reales y complejas:
-la **logística**, el **mapa cuadrático complejo** `z²+c` y el **punto fijo de cos(x)**.
+la **logística**, el **unción cuadrática compleja** `z²+c` y el **punto fijo de cos(x)**.
 Incluye análisis de atractores, discretización en coordenadas, visualización de
 trayectorias, diagrama de bifurcación, conjunto de Mandelbrot y generación de
 patrones musicales (Strudel).
