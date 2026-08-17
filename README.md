@@ -1,7 +1,7 @@
 # Fractal Music
 
 Aplicación de investigación matemática para explorar sucesiones reales y complejas:
-la **logística**, el **unción cuadrática compleja** `z²+c` y el **punto fijo de cos(x)**.
+la **logística**, el **mapa cuadrático complejo** `z²+c` y el **punto fijo de cos(x)**.
 Incluye análisis de atractores, discretización en coordenadas, visualización de
 trayectorias, diagrama de bifurcación, conjunto de Mandelbrot y generación de
 patrones musicales (Strudel).
@@ -75,7 +75,6 @@ python .\explorador_visual.py
 - `Exportar JSON`/`CSV` e `Importar JSON` gestionan sesiones completas.
 - El menú `Strudel` transforma los atractores discretizados en comandos musicales.
 
-FUNCIONA BASTANTE PEOR QUE LA VERSION EN RUST --> La de Python esta muy desactualizada.
 ---
 
 ## Versión Rust (eframe/egui)

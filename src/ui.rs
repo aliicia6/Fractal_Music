@@ -36,6 +36,12 @@ enum Language {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThemeChoice {
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SequenceChoice {
     Cosine,
     Logistic,
@@ -71,6 +77,7 @@ struct CaseRun {
 
 pub struct VisualExplorerApp {
     language: Language,
+    theme: ThemeChoice,
     sequence: SequenceChoice,
     coordinates: CoordinateChoice,
     table_mode: TableMode,
@@ -166,6 +173,7 @@ impl VisualExplorerApp {
         let config = default_concept_config();
         let mut app = Self {
             language: Language::Spanish,
+            theme: ThemeChoice::Dark,
             sequence: SequenceChoice::Logistic,
             coordinates: CoordinateChoice::Cartesian,
             table_mode: TableMode::Sucesion,
@@ -270,6 +278,10 @@ impl eframe::App for VisualExplorerApp {
         } else if self.strudel_process.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        ctx.set_visuals(match self.theme {
+            ThemeChoice::Dark => egui::Visuals::dark(),
+            ThemeChoice::Light => egui::Visuals::light(),
+        });
         ctx.style_mut(|style| {
             style.visuals.selection.bg_fill = app_accent_color();
             style.visuals.selection.stroke.color = Color32::WHITE;
@@ -412,6 +424,10 @@ impl eframe::App for VisualExplorerApp {
                         ui.selectable_value(&mut self.language, Language::Spanish, "Español");
                         ui.selectable_value(&mut self.language, Language::English, "English");
                         ui.separator();
+                        ui.label(localized(language, "Tema", "Theme"));
+                        ui.selectable_value(&mut self.theme, ThemeChoice::Dark, localized(language, "Oscuro", "Dark"));
+                        ui.selectable_value(&mut self.theme, ThemeChoice::Light, localized(language, "Claro", "Light"));
+                        ui.separator();
                         ui.label(localized(language, "Carpeta de exportación", "Export folder"));
                         ui.horizontal(|ui| {
                             ui.add(egui::TextEdit::singleline(&mut self.export_directory).desired_width(220.0));
@@ -536,7 +552,7 @@ impl eframe::App for VisualExplorerApp {
                         ));
                         ui.label(localized(
                             language,
-                            "Archivo permite importar JSON, exportar la sesi\u{00f3}n completa y exportar todas las tablas a CSV. Configuraci\u{00f3}n cambia idioma y carpeta de exportaci\u{00f3}n. Ver cambia el modo de ventana.",
+                            "Archivo permite importar JSON, exportar la sesi\u{00f3}n completa y exportar todas las tablas a CSV. Configuraci\u{00f3}n cambia idioma, tema claro u oscuro y carpeta de exportaci\u{00f3}n. Ver cambia el modo de ventana.",
                             "File imports JSON, exports the complete session, and exports all tables to CSV. Settings changes language and export folder. View changes the window mode.",
                         ));
                         ui.label(localized(
