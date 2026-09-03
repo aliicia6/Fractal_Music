@@ -108,6 +108,27 @@ La ventana se abre con el título **"Fractal Music"** (~1600×980).
 cargo test
 ```
 
+### Distribución portable Windows x64 (offline)
+
+El archivo `.cargo/config.toml` activa el runtime CRT estático para
+`x86_64-pc-windows-msvc`. Para crear la distribución sin instalador Tauri:
+
+1. Instala el toolchain MSVC de 64 bits y coloca el runtime fijo completo de
+   WebView2 en una carpeta local. Esa carpeta debe contener
+   `msedgewebview2.exe`.
+2. Ejecuta PowerShell desde el proyecto:
+
+   ```powershell
+   .\scripts\package-windows-portable.ps1 -WebView2Runtime C:\ruta\webview2
+   ```
+
+El script ejecuta `cargo build --release` y genera
+`dist\FractalMusic-Windows-x64.zip`, con la carpeta `Fractal Music` completa.
+El runtime WebView2 no se versiona en Git; adjúntalo al Release de GitHub o
+proporciónalo al ejecutar el script. Strudel se incluye en el ejecutable
+principal mediante `include_bytes!`, se extrae automáticamente a `%TEMP%` y se
+abre usando el runtime WebView2 situado junto a `fractal_music.exe`.
+
 > Nota: el crate usa `rfd` (diálogos de archivo) y `arboard` (portapapeles),
 > ambos multiplataforma. En Windows los diálogos nativos y el portapapeles
 > funcionan sin configuración adicional.

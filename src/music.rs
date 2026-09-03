@@ -84,7 +84,7 @@ impl StrudelPattern {
 }
 
 pub fn generate_strudel_pattern(
-    results: &[(String, DiscreteAnalysisResult)],
+    results: &[(&str, &DiscreteAnalysisResult)],
     config: Option<MusicMappingConfig>,
 ) -> Result<StrudelPattern> {
     let config = config.unwrap_or_default();
@@ -103,7 +103,7 @@ pub fn generate_strudel_pattern(
             }
             if !notes.is_empty() {
                 attractors.push(MusicalAttractor {
-                    case_label: case_label.clone(),
+                    case_label: (*case_label).to_string(),
                     attractor_index: attractor_index + 1,
                     period: discrete_attractor.attractor.period,
                     notes,

@@ -140,8 +140,13 @@ fn conjugacy_round_trip_works() {
 fn strudel_generation_works() {
     let config = default_concept_config();
     let result = run_exploration(&config).unwrap();
+    let results = [(String::from("ejemplo"), result)];
+    let music_results = results
+        .iter()
+        .map(|(label, result)| (label.as_str(), result))
+        .collect::<Vec<_>>();
     let pattern = generate_strudel_pattern(
-        &[(String::from("ejemplo"), result)],
+        &music_results,
         Some(MusicMappingConfig {
             criterion: String::from("harmony"),
             segmentation: String::from("sectors"),

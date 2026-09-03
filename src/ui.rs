@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -12,9 +14,9 @@ use crate::audio::describe_strudel;
 
 use crate::{
     AnalysisConfig, AxisRangeConfig, BehaviorKind, DiscretizationConfig, DiscreteAnalysisResult,
-    ExplorationCase, ExplorerConfig, MandelbrotCallback, MusicMappingConfig, RecurrenceConfig,
-    build_session_data, default_concept_config, generate_strudel_pattern, logistic_to_quadratic,
-    parse_session_data, quadratic_to_logistic, run_exploration, write_session,
+    ExplorationCase, ExplorerConfig, ImportedSession, MandelbrotCallback, MusicMappingConfig, RecurrenceConfig,
+    build_coordinate_system, build_grid, build_session_data, default_concept_config, generate_strudel_pattern, logistic_to_quadratic,
+    parse_session_data, quadratic_to_logistic, run_exploration, write_session, DiscreteTransformer,
 };
 
 const MAP_BOUNDS_LOGISTIC: (f64, f64, f64, f64) = (0.0, 4.0, 0.0, 1.0);
@@ -24,6 +26,7 @@ const DEFAULT_TOLERANCE: f64 = 1e-7;
 const VISIBLE_TABLE_ROWS: usize = 4;
 const TABLE_ROW_HEIGHT: f32 = 18.0;
 const MAX_RENDERED_TRAJECTORY_POINTS: usize = 2_000;
+const EMBEDDED_STRUDEL: &[u8] = include_bytes!("../resources/strudel/strudel.exe");
 
 fn app_accent_color() -> Color32 {
     Color32::from_rgb(42, 104, 156)
@@ -1904,7 +1907,7 @@ impl VisualExplorerApp {
                 let pairs = self
                     .runs
                     .iter()
-                    .map(|run| (run.case.label.clone(), run.result.clone()))
+                    .map(|run| (run.case.label.as_str(), &run.result))
                     .collect::<Vec<_>>();
                 if let Ok(pattern) = generate_strudel_pattern(
                     &pairs,
@@ -1984,7 +1987,7 @@ impl VisualExplorerApp {
         let pairs = self
             .runs
             .iter()
-            .map(|run| (run.case.label.clone(), run.result.clone()))
+            .map(|run| (run.case.label.as_str(), &run.result))
             .collect::<Vec<_>>();
         if let Ok(pattern) = generate_strudel_pattern(
             &pairs,
@@ -2034,31 +2037,40 @@ impl VisualExplorerApp {
                 Err(_) => return,
             }
         }
-        let executable_name = if cfg!(target_os = "windows") {
+        let temp_root = std::env::temp_dir().join("fractal_music_strudel");
+        let path = temp_root.join(if cfg!(target_os = "windows") {
             "strudel.exe"
         } else {
             "strudel"
-        };
-        let mut candidates = Vec::new();
-        if let Ok(current_exe) = std::env::current_exe() {
-            if let Some(parent) = current_exe.parent() {
-                candidates.push(parent.join("resources").join("strudel").join(executable_name));
-                candidates.push(parent.join(executable_name));
-            }
+        });
+        let profile_dir = temp_root.join("profile");
+        if let Err(error) =
+            fs::create_dir_all(&temp_root).and_then(|_| fs::write(&path, EMBEDDED_STRUDEL))
+        {
+            self.message = format!("No se pudo extraer Strudel: {error}");
+            return;
         }
-        candidates.push(std::path::PathBuf::from("resources").join("strudel").join(executable_name));
+        if let Err(error) = fs::create_dir_all(&profile_dir) {
+            self.message = format!("No se pudo preparar el perfil de Strudel: {error}");
+            return;
+        }
 
-        if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
-        let profile_dir = std::env::temp_dir().join("fractal_music_strudel_profile");
-            let _ = std::fs::remove_dir_all(&profile_dir);
-            let mut command = std::process::Command::new(&path);
-            command.env("WEBVIEW2_USER_DATA_FOLDER", &profile_dir);
-            match command.spawn() {
-                Ok(process) => self.strudel_process = Some(process),
-                Err(error) => self.message = format!("No se pudo abrir Strudel: {error}"),
+        let mut command = std::process::Command::new(&path);
+        command.current_dir(&temp_root);
+        command.env("WEBVIEW2_USER_DATA_FOLDER", &profile_dir);
+        if let Some(runtime_dir) = portable_webview2_directory() {
+            if !runtime_dir.join("msedgewebview2.exe").is_file() {
+                self.message = format!(
+                    "No se encontró el runtime portable de WebView2 en {}.",
+                    runtime_dir.display()
+                );
+                return;
             }
-        } else {
-            self.message = String::from("No se encontró el componente offline de Strudel junto a la aplicación.");
+            command.env("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", runtime_dir);
+        }
+        match command.spawn() {
+            Ok(process) => self.strudel_process = Some(process),
+            Err(error) => self.message = format!("No se pudo abrir Strudel: {error}"),
         }
     }
 
@@ -2382,7 +2394,7 @@ impl VisualExplorerApp {
             let pairs = self
                 .runs
                 .iter()
-                .map(|run| (run.case.label.clone(), run.result.clone()))
+                .map(|run| (run.case.label.as_str(), &run.result))
                 .collect::<Vec<_>>();
             if let Ok(pattern) = generate_strudel_pattern(
                 &pairs,
@@ -2664,16 +2676,58 @@ impl VisualExplorerApp {
         Ok(())
     }
 
+    fn restore_imported_results(&mut self, imported: &ImportedSession) -> Result<()> {
+        if imported.cached_results.is_empty() {
+            return Ok(());
+        }
+        let transformer = DiscreteTransformer::new(
+            build_coordinate_system(&imported.config.discretization.coordinate_system)?,
+            build_grid(&imported.config.discretization)?,
+        )?;
+        let mut restored_runs = Vec::with_capacity(self.cases.len());
+        for case in &self.cases {
+            let Some(sequence_result) = imported.cached_results.get(&case.identifier) else {
+                continue;
+            };
+            let run_config = ExplorerConfig {
+                recurrence: case.recurrence.clone(),
+                analysis: imported.config.analysis.clone(),
+                discretization: imported.config.discretization.clone(),
+            };
+            let result = DiscreteAnalysisResult::from_analysis(
+                sequence_result.clone(),
+                transformer.clone(),
+                Some(run_config),
+            )?;
+            let (trajectory_points, attractor_points) = build_render_points(&result);
+            restored_runs.push(CaseRun {
+                case: case.clone(),
+                is_active: self.active_case_id.as_ref() == Some(&case.identifier),
+                mandelbrot_member: mandelbrot_membership_for_case(case),
+                trajectory_points,
+                attractor_points,
+                result,
+            });
+        }
+        self.runs = restored_runs;
+        self.cached_analysis = Some(imported.config.analysis.clone());
+        self.cached_discretization = Some(imported.config.discretization.clone());
+        Ok(())
+    }
+
     fn import_json(&mut self, path: &std::path::Path) -> Result<()> {
         let raw = std::fs::read_to_string(path)?;
         let data = serde_json::from_str::<serde_json::Value>(&raw)?;
         let imported = parse_session_data(&data)?;
-        self.cases = imported.cases;
+        self.cases = imported.cases.clone();
+        self.runs.clear();
+        self.table_cache.clear();
         self.cached_analysis = None;
         self.cached_discretization = None;
-        self.active_case_id = imported.active_case_id;
+        self.active_case_id = imported.active_case_id.clone();
         self.case_counter = self.cases.len();
         self.apply_config(&imported.config);
+        self.restore_imported_results(&imported)?;
         self.music_criterion = imported
             .music
             .get("criterion")
@@ -2698,8 +2752,10 @@ impl VisualExplorerApp {
         for (key, value) in imported.map_limits {
             self.map_limits.insert(key, value);
         }
-        // After importing, persist the session to the autosave file so the state is kept
-        let _ = self.autosave_session();
+        // Solo se recalculan los casos sin resultado almacenado en el JSON.
+        self.recalculate()?;
+        self.refresh_strudel_code();
+        self.dirty = false;
         Ok(())
     }
 
@@ -3181,6 +3237,12 @@ fn default_export_directory() -> String {
         .into_owned()
 }
 
+fn portable_webview2_directory() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("webview2")))
+}
+
 fn text_row(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
     ui.horizontal(|ui| {
         ui.label(label);
@@ -3253,14 +3315,27 @@ fn format_mapping_usize(mapping: Option<&indexmap::IndexMap<String, usize>>) -> 
     )
 }
 
-fn thin_plot_plotpoints(points: Vec<PlotPoint>, maximum: usize) -> Vec<PlotPoint> {
-    if points.len() <= maximum || maximum < 2 {
-        return points;
+fn thin_plot_plotpoints<I>(points: I, maximum: usize) -> Vec<PlotPoint>
+where
+    I: Iterator<Item = PlotPoint> + Clone,
+{
+    let point_count = points.clone().count();
+    if point_count <= maximum || maximum < 2 {
+        return points.collect();
     }
-    let last = points.len() - 1;
-    (0..maximum)
-        .map(|index| points[index * last / (maximum - 1)])
-        .collect()
+    let last = point_count - 1;
+    let mut selected = Vec::with_capacity(maximum);
+    let mut next_index = 0;
+    for (index, point) in points.enumerate() {
+        if index == next_index {
+            selected.push(point);
+            if selected.len() == maximum {
+                break;
+            }
+            next_index = selected.len() * last / (maximum - 1);
+        }
+    }
+    selected
 }
 
 fn build_render_points(
@@ -3286,7 +3361,7 @@ fn build_render_points(
                 )
             }
         })
-        .collect::<Vec<_>>();
+        ;
     let trajectory = thin_plot_plotpoints(trajectory, MAX_RENDERED_TRAJECTORY_POINTS);
 
     let attractors = result
@@ -3316,7 +3391,7 @@ fn build_render_points(
                         )
                     }
                 })
-                .collect::<Vec<_>>();
+                ;
             thin_plot_plotpoints(points, MAX_RENDERED_TRAJECTORY_POINTS)
         })
         .collect();
@@ -3339,4 +3414,3 @@ fn compute_bifurcation_points() -> Vec<PlotPoint> {
     }
     points
 }
-

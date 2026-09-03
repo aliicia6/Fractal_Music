@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::config::{AnalysisConfig, DiscretizationConfig, ExplorerConfig, RecurrenceConfig};
-use crate::models::{Attractor, SequenceTerm};
+use crate::models::{Attractor, AttractorKind, BehaviorKind, SequenceAnalysisResult, SequenceTerm};
 use crate::transformations::{DiscreteAnalysisResult, DiscretePoint};
 
 pub const SESSION_SCHEMA: &str = "fractal_sequences.visual_session";
@@ -29,6 +29,7 @@ pub struct ImportedSession {
     pub table_mode: String,
     pub map_limits: BTreeMap<String, (f64, f64, f64, f64)>,
     pub music: BTreeMap<String, String>,
+    pub cached_results: BTreeMap<String, SequenceAnalysisResult>,
 }
 
 pub fn config_to_data(config: &ExplorerConfig) -> Value {
@@ -183,6 +184,21 @@ pub fn parse_session_data(data: &Value) -> Result<ImportedSession> {
         .map(case_from_data)
         .collect::<Result<Vec<_>>>()?;
 
+    let mut cached_results = BTreeMap::new();
+    if let Some(entries) = object.get("results").and_then(Value::as_array) {
+        for entry in entries {
+            let entry = entry.as_object().ok_or_else(|| anyhow::anyhow!("Resultado de sesion invalido"))?;
+            let case_id = entry
+                .get("case_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("Resultado de sesion sin case_id"))?;
+            let result = entry
+                .get("result")
+                .ok_or_else(|| anyhow::anyhow!("Resultado de sesion incompleto"))?;
+            cached_results.insert(case_id.to_string(), sequence_result_from_data(result)?);
+        }
+    }
+
     let mut map_limits = BTreeMap::new();
     if let Some(raw_limits) = view_object.get("map_limits").and_then(Value::as_object) {
         for (key, value) in raw_limits {
@@ -225,9 +241,59 @@ pub fn parse_session_data(data: &Value) -> Result<ImportedSession> {
         table_mode,
         map_limits,
         music,
+        cached_results,
     })
 }
 
+fn sequence_result_from_data(data: &Value) -> Result<SequenceAnalysisResult> {
+    let object = data.as_object().ok_or_else(|| anyhow::anyhow!("Resultado de sesion invalido"))?;
+    let terms = object
+        .get("terms")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("Resultado de sesion sin terminos"))?
+        .iter()
+        .map(|term| {
+            let term = term.as_object().ok_or_else(|| anyhow::anyhow!("Termino de sesion invalido"))?;
+            Ok(SequenceTerm {
+                index: term.get("index").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("Termino sin indice"))? as usize,
+                value: number_from_data(term.get("value").ok_or_else(|| anyhow::anyhow!("Termino sin valor"))?)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let attractors = object
+        .get("attractors")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("Resultado de sesion sin atractores"))?
+        .iter()
+        .map(attractor_from_data)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(SequenceAnalysisResult {
+        terms,
+        attractors,
+        diverged: object.get("diverged").and_then(Value::as_bool).unwrap_or(false),
+        reason: object.get("reason").and_then(Value::as_str).unwrap_or_default().to_string(),
+        behavior: serde_json::from_value::<BehaviorKind>(object.get("behavior").cloned().unwrap_or(Value::String(String::from("calculation_error"))))?,
+    })
+}
+
+fn attractor_from_data(data: &Value) -> Result<Attractor> {
+    let object = data.as_object().ok_or_else(|| anyhow::anyhow!("Atractor de sesion invalido"))?;
+    Ok(Attractor {
+        values: object.get("values").and_then(Value::as_array).ok_or_else(|| anyhow::anyhow!("Atractor sin valores"))?.iter().map(number_from_data).collect::<Result<Vec<_>>>()?,
+        kind: serde_json::from_value::<AttractorKind>(object.get("kind").cloned().unwrap_or(Value::String(String::from("unknown"))))?,
+        period: object.get("period").and_then(Value::as_u64).unwrap_or(0) as usize,
+        tolerance: object.get("tolerance").and_then(Value::as_f64).unwrap_or(0.0),
+        start_index: object.get("start_index").and_then(Value::as_u64).map(|value| value as usize),
+    })
+}
+
+fn number_from_data(data: &Value) -> Result<crate::models::Number> {
+    let object = data.as_object().ok_or_else(|| anyhow::anyhow!("Numero complejo de sesion invalido"))?;
+    Ok(crate::models::Number::new(
+        object.get("real").and_then(Value::as_f64).ok_or_else(|| anyhow::anyhow!("Numero complejo sin parte real"))?,
+        object.get("imag").and_then(Value::as_f64).ok_or_else(|| anyhow::anyhow!("Numero complejo sin parte imaginaria"))?,
+    ))
+}
 pub fn write_session(path: impl AsRef<Path>, data: &Value) -> Result<()> {
     std::fs::write(path, serde_json::to_string_pretty(data)?)?;
     Ok(())
